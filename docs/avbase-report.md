@@ -85,6 +85,19 @@ run for these Go-only changes.
   The configured 5s spacing was observed. This validates this deployment path,
   not that mitmproxy cures every 403.
 
+## Native multiarch publishing follow-up
+
+The first hosted run used upstream's single-runner QEMU build and spent several
+minutes in ARM64 standard-library compilation. It was cancelled before publication.
+At the user's request, image CI now uses separate native amd64/arm64 runners,
+architecture-scoped caches and digest artifacts, then merges and verifies a
+manifest only after both jobs succeed. Dockerfile build/target platform arguments
+also allow efficient Go cross-compilation in local builds (`CGO_ENABLED=0` remains
+set by the existing Makefile). The revised Dockerfile built both Linux amd64 and
+arm64 images locally; both containers started and returned HTTP 200 with AVBASE
+in `/v1/providers` (amd64 runtime used local emulation on this ARM host).
+`actionlint` and `git diff --check` passed for the revised workflow.
+
 ## Limits
 
 These are small real-site probes, not a sustained throughput/success-rate study.

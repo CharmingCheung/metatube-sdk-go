@@ -1,10 +1,12 @@
-FROM golang:alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /src
 COPY . /src
 
 RUN apk add --update --no-cache --no-progress make git \
-    && make server
+    && GOOS=$TARGETOS GOARCH=$TARGETARCH make server
 
 FROM alpine:latest
 LABEL org.opencontainers.image.licenses=Apache-2.0

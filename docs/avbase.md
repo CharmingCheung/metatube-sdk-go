@@ -90,7 +90,11 @@ also remains available when no provider-specific proxy is set.
 `make server` and the Dockerfile both include AVBASE without enabling unrelated
 experimental providers. The Docker workflow publishes to the lowercase fork
 owner's GHCR namespace, with `packages: write` permission. Pushes to `main` produce
-`dev` and `sha-<12-character-commit>` images for amd64/arm64; version tags produce
+`dev` and `sha-<12-character-commit>` images for amd64/arm64. The two architectures
+build in parallel on `ubuntu-24.04` and `ubuntu-24.04-arm` native runners, with
+separate caches. Each uploads its immutable image digest; only after both builds
+succeed does a merge job publish the shared multiarch tags and verify both
+architectures in the manifest. No QEMU is used in CI. Version tags produce
 `latest` and the version tag. `workflow_dispatch` can rebuild main manually.
 Enable GitHub Actions in the fork if GitHub has disabled inherited workflows.
 
