@@ -4,7 +4,12 @@ concurrency:
   group: docker-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: write
+
 on:
+  workflow_dispatch:
   push:
     branches:
       - 'main'
@@ -43,7 +48,9 @@ jobs:
       - name: Get Version
         id: shell
         run: |
-          echo "version=$(git describe --abbrev=0 --tags HEAD | cut -d'v' -f 2)" >> $GITHUB_OUTPUT
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/metatube-server" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build and Push (dev)
         if: github.ref == 'refs/heads/main'
@@ -51,10 +58,13 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          build-args: |
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/metatube-community/metatube-server:dev
+            ${{ steps.shell.outputs.image }}:dev
+            ${{ steps.shell.outputs.image }}:sha-${{ steps.shell.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -64,10 +74,12 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          build-args: |
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/metatube-community/metatube-server:latest
-            ghcr.io/metatube-community/metatube-server:${{ steps.shell.outputs.version }}
+            ${{ steps.shell.outputs.image }}:latest
+            ${{ steps.shell.outputs.image }}:${{ steps.shell.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

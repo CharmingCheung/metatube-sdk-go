@@ -1,0 +1,5 @@
+.env
+mitmproxy/
+metatube/
+db/
+build/

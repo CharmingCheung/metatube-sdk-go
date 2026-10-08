@@ -36,6 +36,12 @@ Metadata Tube SDK in Golang.
 - 20+ providers
 - Text translation
 
+## AVBASE fork
+
+This fork includes AVBASE in normal builds, with paced requests, bounded retries,
+and optional provider-specific proxy support. See [AVBASE deployment and configuration](docs/avbase.md)
+and [verification report](docs/avbase-report.md).
+
 ## Installation
 
 To install this package, you first need [Go](https://golang.org/) installed (**go1.25+ is required**), then you can use

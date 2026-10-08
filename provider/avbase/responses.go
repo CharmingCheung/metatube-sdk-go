@@ -34,6 +34,7 @@ type workResponse struct {
 		} `json:"sample_image_urls"`
 		ItemInfo struct {
 			Description string `json:"description"`
+			Director    string `json:"director"`
 			Price       string `json:"price"`
 			Volume      string `json:"volume"`
 		} `json:"iteminfo"`

@@ -26,3 +26,7 @@ go.work.sum
 
 # Build files
 build/
+
+# Local AVBASE proxy certificate/key material and example deployment state
+/mitmproxy/
+/metatube/

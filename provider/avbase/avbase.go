@@ -1,22 +1,19 @@
 package avbase
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/gocolly/colly/v2"
 	"golang.org/x/text/language"
 
 	"github.com/metatube-community/metatube-sdk-go/common/fetch"
 	"github.com/metatube-community/metatube-sdk-go/common/number"
 	"github.com/metatube-community/metatube-sdk-go/common/parser"
-	"github.com/metatube-community/metatube-sdk-go/common/singledo"
 	"github.com/metatube-community/metatube-sdk-go/model"
 	"github.com/metatube-community/metatube-sdk-go/provider"
 	"github.com/metatube-community/metatube-sdk-go/provider/duga"
@@ -31,6 +28,7 @@ var (
 	_ provider.MovieProvider = (*AVBase)(nil)
 	_ provider.MovieSearcher = (*AVBase)(nil)
 	_ provider.Fetcher       = (*AVBase)(nil)
+	_ provider.ConfigSetter  = (*AVBase)(nil)
 )
 
 const (
@@ -39,17 +37,16 @@ const (
 )
 
 const (
-	baseURL      = "https://www.avbase.net/"
-	movieURL     = "https://www.avbase.net/works/%s"
-	movieAPIURL  = "https://www.avbase.net/_next/data/%s/works/%s.json?id=%s"
-	searchAPIURL = "https://www.avbase.net/_next/data/%s/works.json?q=%s"
+	baseURL  = "https://www.avbase.net/"
+	movieURL = "https://www.avbase.net/works/%s"
 )
 
 type AVBase struct {
 	*fetch.Fetcher
 	*scraper.Scraper
-	single    *singledo.Single
-	providers map[string]provider.MovieProvider
+	pages            *pageClient
+	sourceEnrichment bool
+	providers        map[string]provider.MovieProvider
 }
 
 func New() *AVBase {
@@ -60,7 +57,7 @@ func New() *AVBase {
 			scraper.WithHeaders(map[string]string{
 				"Referer": baseURL,
 			})),
-		single: singledo.NewSingle(2 * time.Hour),
+		pages: newPageClient(),
 		providers: map[string]provider.MovieProvider{
 			"duga":    duga.New(),
 			"fanza":   fanza.New(),
@@ -98,29 +95,23 @@ func (ab *AVBase) GetMovieInfoByURL(rawURL string) (info *model.MovieInfo, err e
 		return
 	}
 
-	buildID, err := ab.GetBuildID()
-	if err != nil {
-		return
+	var data struct {
+		Work *workResponse `json:"work"`
 	}
-
-	c := ab.ClonedCollector()
-
-	c.OnResponse(func(r *colly.Response) {
-		data := struct {
-			PageProps struct {
-				Work workResponse `json:"work"`
-			} `json:"pageProps"`
-		}{}
-		if err = json.Unmarshal(r.Body, &data); err == nil {
-			workInfo, _ := ab.getMovieInfoFromWork(data.PageProps.Work)
-			srcInfo, srcErr := ab.getMovieInfoFromSource(data.PageProps.Work)
-			if srcErr != nil {
-				info = workInfo /* ignore error and fallback to work info */
-				return
-			}
-			// use source info.
+	if err = ab.pages.page("works/"+url.PathEscape(id), &data); err != nil {
+		return nil, err
+	}
+	if data.Work == nil || data.Work.WorkID == "" {
+		return nil, provider.ErrInfoNotFound
+	}
+	workInfo, err := ab.getMovieInfoFromWork(*data.Work)
+	if err != nil {
+		return nil, err
+	}
+	info = workInfo
+	if ab.sourceEnrichment {
+		if srcInfo, srcErr := ab.getMovieInfoFromSource(*data.Work); srcErr == nil {
 			info = srcInfo
-			// supplement info fields.
 			if info.Maker == "" {
 				info.Maker = workInfo.Maker
 			}
@@ -136,39 +127,26 @@ func (ab *AVBase) GetMovieInfoByURL(rawURL string) (info *model.MovieInfo, err e
 			if len(info.Genres) == 0 {
 				info.Genres = workInfo.Genres
 			}
-			// replace actor names.
 			if len(workInfo.Actors) > 0 {
 				info.Actors = workInfo.Actors
 			}
-			// prefer workID number.
-			if workInfo.Number != "" {
-				info.Number = workInfo.Number
-			}
-			// choose right ID for info.
-			if len(workInfo.ID) > len(id) && strings.Contains(workInfo.ID, ":") {
-				id = workInfo.ID
-			}
+			info.Number = workInfo.Number
 		}
-	})
-
-	c.OnScraped(func(_ *colly.Response) {
-		if info != nil {
-			// As a provider wrapper.
-			info.ID = id
-			info.Provider = ab.Name()
-			info.Homepage = rawURL
-		}
-	})
-
-	if vErr := c.Visit(fmt.Sprintf(movieAPIURL, buildID, id, url.QueryEscape(id))); vErr != nil {
-		err = vErr
 	}
-	return
+	info.ID = workInfo.ID
+	info.Provider = ab.Name()
+	info.Homepage = fmt.Sprintf(movieURL, url.PathEscape(info.ID))
+	if !info.IsValid() {
+		return nil, provider.ErrInfoNotFound
+	}
+	return info, nil
 }
 
 func (ab *AVBase) getMovieInfoFromWork(work workResponse) (info *model.MovieInfo, err error) {
 	info = &model.MovieInfo{
 		ID:            ab.JoinPrefixID(work.Prefix, work.WorkID),
+		Title:         work.Title,
+		ReleaseDate:   parser.ParseDate(work.MinDate),
 		Number:        work.WorkID,
 		Actors:        []string{},
 		PreviewImages: []string{},
@@ -200,6 +178,12 @@ func (ab *AVBase) getMovieInfoFromWork(work workResponse) (info *model.MovieInfo
 		if info.Summary == "" {
 			info.Summary = product.ItemInfo.Description
 		}
+		if info.Director == "" {
+			info.Director = product.ItemInfo.Director
+		}
+		if info.Runtime == 0 {
+			info.Runtime, _ = strconv.Atoi(product.ItemInfo.Volume)
+		}
 		if time.Time(info.ReleaseDate).IsZero() {
 			info.ReleaseDate = parser.ParseDate(product.Date)
 		}
@@ -217,6 +201,11 @@ func (ab *AVBase) getMovieInfoFromWork(work workResponse) (info *model.MovieInfo
 	}
 	for _, cast := range work.Casts {
 		info.Actors = append(info.Actors, cast.Actor.Name)
+	}
+	if len(info.Actors) == 0 {
+		for _, actor := range work.Actors {
+			info.Actors = append(info.Actors, actor.Name)
+		}
 	}
 	return
 }
@@ -249,56 +238,27 @@ func (ab *AVBase) NormalizeMovieKeyword(keyword string) string {
 }
 
 func (ab *AVBase) SearchMovie(keyword string) (results []*model.MovieSearchResult, err error) {
-	buildID, err := ab.GetBuildID()
-	if err != nil {
-		return
+	var data struct {
+		Works *[]workResponse `json:"works"`
 	}
-
-	c := ab.ClonedCollector()
-
-	c.OnResponse(func(r *colly.Response) {
-		data := struct {
-			PageProps struct {
-				Works []workResponse `json:"works"`
-			} `json:"pageProps"`
-		}{}
-		if json.Unmarshal(r.Body, &data) == nil {
-			for _, work := range data.PageProps.Works {
-				sort.SliceStable(work.Products, func(i, j int) bool {
-					return work.Products[i].Source > work.Products[j].Source
-				})
-				index := -1
-				for i, product := range work.Products {
-					if _, ok := ab.providers[product.Source]; ok {
-						index = i
-						break
-					}
-				}
-				if index < 0 {
-					// ignore if this work has no products or
-					// no suitable source providers.
-					continue
-				}
-				result := &model.MovieSearchResult{
-					ID:          ab.JoinPrefixID(work.Prefix, work.WorkID),
-					Number:      work.WorkID,
-					Title:       work.Title,
-					Provider:    ab.Name(),
-					Homepage:    fmt.Sprintf(movieURL, work.WorkID),
-					ThumbURL:    work.Products[index].ThumbnailURL,
-					CoverURL:    work.Products[index].ImageURL,
-					ReleaseDate: parser.ParseDate(work.MinDate),
-				}
-				for _, actor := range work.Actors {
-					result.Actors = append(result.Actors, actor.Name)
-				}
-				results = append(results, result)
-			}
+	if err = ab.pages.page("works?q="+url.QueryEscape(keyword), &data); err != nil {
+		return nil, err
+	}
+	if data.Works == nil {
+		return nil, fmt.Errorf("AVBASE: search response missing works")
+	}
+	for _, work := range *data.Works {
+		info, parseErr := ab.getMovieInfoFromWork(work)
+		if parseErr != nil {
+			return nil, parseErr
 		}
-	})
-
-	err = c.Visit(fmt.Sprintf(searchAPIURL, buildID, url.QueryEscape(keyword)))
-	return
+		info.Provider = ab.Name()
+		info.Homepage = fmt.Sprintf(movieURL, url.PathEscape(info.ID))
+		if info.IsValid() {
+			results = append(results, info.ToSearchResult())
+		}
+	}
+	return results, nil
 }
 
 func (ab *AVBase) JoinPrefixID(prefix, workID string) string {
@@ -308,41 +268,18 @@ func (ab *AVBase) JoinPrefixID(prefix, workID string) string {
 	return fmt.Sprintf("%s:%s", prefix, workID)
 }
 
+// GetBuildID is retained for SDK callers. Scraping no longer depends on it.
 func (ab *AVBase) GetBuildID() (string, error) {
-	v, err, _ := ab.single.Do(func() (any, error) {
-		return ab.getBuildID()
-	})
+	data, err := ab.pages.document("")
 	if err != nil {
 		return "", err
 	}
-	return v.(string), nil
-}
-
-func (ab *AVBase) getBuildID() (buildID string, err error) {
-	defer func() {
-		if err == nil && buildID == "" {
-			err = errors.New("empty build id")
-		}
-	}()
-
-	c := ab.ClonedCollector()
-
-	c.OnXML(`//*[@id="__NEXT_DATA__"]`, func(e *colly.XMLElement) {
-		data := struct {
-			BuildId string `json:"buildId"`
-		}{}
-		if err = json.NewDecoder(strings.NewReader(e.Text)).Decode(&data); err == nil {
-			buildID = data.BuildId
-		}
-	})
-
-	if vErr := c.Visit(baseURL); vErr != nil {
-		err = vErr
+	if data.BuildID == "" {
+		return "", fmt.Errorf("AVBASE: empty build id")
 	}
-	return
+	return data.BuildID, nil
 }
 
 func init() {
-	// The stability of this provider is still unknown.
 	provider.Register(Name, New)
 }
