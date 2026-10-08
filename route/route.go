@@ -4,6 +4,7 @@ import (
 	goerr "errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -145,6 +146,21 @@ func getProviders(app *engine.Engine) gin.HandlerFunc {
 }
 
 func abortWithError(c *gin.Context, err error) {
+	var cooldown errors.Retryable
+	if goerr.As(err, &cooldown) {
+		until := cooldown.RetryAfter()
+		if delay := time.Until(until); delay > 0 {
+			seconds := int64((delay + time.Second - 1) / time.Second)
+			c.Header("Retry-After", strconv.FormatInt(seconds, 10))
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{
+				"code":     http.StatusServiceUnavailable,
+				"message":  "Metadata source is cooling down; retry after the indicated time",
+				"retry_at": until.UTC().Format(time.RFC3339),
+			}})
+			return
+		}
+	}
+
 	var e *errors.HTTPError
 	if goerr.As(err, &e) {
 		c.AbortWithStatusJSON(e.Code, &responseMessage{Error: e})

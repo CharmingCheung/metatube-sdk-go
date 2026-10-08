@@ -1,6 +1,7 @@
 package engine
 
 import (
+	goerr "errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/metatube-community/metatube-sdk-go/common/comparer"
 	"github.com/metatube-community/metatube-sdk-go/common/number"
 	"github.com/metatube-community/metatube-sdk-go/engine/providerid"
+	mterrors "github.com/metatube-community/metatube-sdk-go/errors"
 	"github.com/metatube-community/metatube-sdk-go/model"
 	mt "github.com/metatube-community/metatube-sdk-go/provider"
 )
@@ -121,6 +123,7 @@ func (e *Engine) searchMovieAll(keyword string) (results []*model.MovieSearchRes
 		close(respCh)
 	}()
 
+	var cooldown mterrors.Retryable
 	ds := make([]string, 0, e.movieProviders.Len())
 	// response channel.
 	for resp := range respCh {
@@ -136,11 +139,19 @@ func (e *Engine) searchMovieAll(keyword string) (results []*model.MovieSearchRes
 		))
 
 		if resp.Error != nil {
+			var retry mterrors.Retryable
+			if goerr.As(resp.Error, &retry) && retry.RetryAfter().After(time.Now()) &&
+				(cooldown == nil || retry.RetryAfter().Before(cooldown.RetryAfter())) {
+				cooldown = retry
+			}
 			continue
 		}
 		results = append(results, resp.Results...)
 	}
 
+	if len(results) == 0 && cooldown != nil {
+		err = cooldown
+	}
 	e.logger.Printf("Search keyword %s: %s", keyword, strings.Join(ds, " | "))
 	return
 }

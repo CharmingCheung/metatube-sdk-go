@@ -28,6 +28,9 @@ type HTTPError struct {
 	RetryAt    time.Time
 }
 
+// RetryAfter exposes a transport-independent cooldown to the HTTP server.
+func (e *HTTPError) RetryAfter() time.Time { return e.RetryAt }
+
 func (e *HTTPError) Error() string {
 	if !e.RetryAt.IsZero() {
 		return fmt.Sprintf("AVBASE: HTTP %d; requests paused until %s (check AVBASE proxy/access if blocked)", e.StatusCode, e.RetryAt.Format(time.RFC3339))

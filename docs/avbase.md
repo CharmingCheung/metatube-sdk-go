@@ -38,7 +38,12 @@ read by this version. Confirm `AVBASE` appears in `/v1/providers` after restart.
 
 429 and transient server errors honor `Retry-After` and use at least 5s/10s/20s
 backoff. A wait beyond the operation budget returns an explicit error and retains
-the cooldown for the next caller. 403 is never immediately retried. Transport,
+the cooldown for the next caller. 403 is never immediately retried. While a source is cooling, metadata API
+errors use HTTP 503 with `Retry-After` and a structured `error.retry_at`; clients
+should defer work until then. Auto search propagates cooling when no usable
+results remain, instead of reporting a false 404. Cached/other-source results
+remain usable. This HTTP contract was added after image `sha-d30bfb28ff27`; use
+an image built from the updated main branch for coordinated client backoff. Transport,
 certificate and parse errors surface directly rather than becoming an empty
 search or a two-hour cached failure. There is no IP rotation, CAPTCHA solver or
 promise that a site's access challenge will always accept the client.

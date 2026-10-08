@@ -121,3 +121,18 @@ No claim of universal proxy or anti-bot compatibility is made.
 Sources: [MetaTube provider configuration](https://metatube-community.github.io/wiki/metadata-providers/),
 [AVBASE access discussion](https://github.com/metatube-community/jellyfin-plugin-metatube/discussions/555),
 [mitmproxy certificates](https://docs.mitmproxy.org/stable/concepts/certificates/).
+
+## Cooldown HTTP contract follow-up
+
+AVBASE's internal deadline now implements a neutral retry interface. HTTP routes
+preserve wrapped cooldowns as 503 plus rounded-up Retry-After seconds and a safe
+structured retry_at. Auto search forwards a cooldown if no results are usable;
+it still returns available other-source/cached results. No HTTP route imports an
+AVBASE-specific error type in production.
+
+The three new route/engine regressions and focused race suite passed. The CI
+package scope passed with 238 test/subtest pass events and 73 skips (63 tested
+packages); vet and linter verification are recorded with this delivery. External
+translation tests and deliberate live 403/429 generation were not rerun.
+CharmingReel's companion change persists source deadlines and defers movie/person
+jobs without spending their ordinary attempt budget. Both sides must be updated.

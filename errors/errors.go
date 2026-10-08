@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // HTTPError implements error interface with HTTP status code.
@@ -49,3 +50,9 @@ func FromCode(code int) error {
 }
 
 var _ error = (*HTTPError)(nil)
+
+// Retryable carries a source cooldown without binding routes to a scraper.
+type Retryable interface {
+	error
+	RetryAfter() time.Time
+}
