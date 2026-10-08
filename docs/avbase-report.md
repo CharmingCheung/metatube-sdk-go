@@ -98,6 +98,17 @@ arm64 images locally; both containers started and returned HTTP 200 with AVBASE
 in `/v1/providers` (amd64 runtime used local emulation on this ARM host).
 `actionlint` and `git diff --check` passed for the revised workflow.
 
+Hosted [native matrix run 37728728531](https://github.com/CharmingCheung/metatube-sdk-go/actions/runs/37728728531)
+completed successfully for source commit `d30bfb28ff27`: both native builds and
+the manifest merge passed. Published tags are
+`ghcr.io/charmingcheung/metatube-server:dev` and
+`ghcr.io/charmingcheung/metatube-server:sha-d30bfb28ff27`. Independent registry
+inspection confirmed Linux amd64 and arm64 in the index with digest
+`sha256:0c5a196c3e5ad8d87da8de54641bdd87735471d9fdff399137d1983afa3f51ed`.
+The additional unknown/unknown entries are build attestations, not extra
+runtime architectures. This documentation-only follow-up does not change the
+built source.
+
 ## Limits
 
 These are small real-site probes, not a sustained throughput/success-rate study.
